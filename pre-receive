@@ -1,0 +1,65 @@
+#!/bin/bash
+#
+#	Git pre-receive hook for validating commits authorship
+#	with linux account full name format : Firstname FULLNAME <email@address>
+#
+#	Adapted from blacklist https://github.com/spuder/git-hooks/blob/master/pre-commit
+#
+
+# Extract full linux user name and email address
+realName=$(getent passwd `whoami`| cut -d ':' -f 5 | cut -d ',' -f 1 |cut -d '<' -f 1|cut -d' ' -f1,2)
+realEmail=$(getent passwd `whoami`| cut -d ':' -f 5 | cut -d ',' -f 1 |cut -d '<' -f 2|cut -d'>' -f1)
+
+check_user() {
+     if [[ "$1" != "$realName" ]]; then
+      echo "You are commiting $sha1 as $2 $1 user which I don't like. Reveal your identity $realName!"
+      exit 1
+     fi
+}
+
+check_email() {
+     if [[ "$1" != "$realEmail" ]]; then
+      echo "You are commiting with $2 email $1 which I don't like. Reveal your email $realEmail!"
+      exit 1
+     fi
+
+}
+check_commit() {
+
+        # Check Author Email
+        check_email $(git log -1 --pretty=format:%ae $1) "author"
+        # Check Comitter Email
+        check_email $(git log -1 --pretty=format:%ce $1) "commiter"
+
+	# Check Author Name
+	check_user "$(git log -1 --pretty=format:%an $1)" "author"
+	# Check Comitter Name
+	check_user "$(git log -1 --pretty=format:%cn $1)" "commiter"
+}
+
+
+# Check all incoming commits
+# http://stackoverflow.com/questions/22546393/can-git-pre-receive-hooks-evaulate-the-incoming-commit
+
+NULL_SHA1="0000000000000000000000000000000000000000" # 40 0's
+new_list=
+any_deleted=false
+while read oldsha newsha refname; do
+    case $oldsha,$newsha in
+    *,$NULL_SHA1) # it's a delete
+        any_deleted=true;;
+    $NULL_SHA1,*) # it's a create
+        new_list="$new_list $newsha";;
+    *,*) # it's an update
+        new_list="$new_list $newsha";;
+    esac
+done
+
+git rev-list $new_list --not --all |
+while read sha1; do
+    objtype=$(git cat-file -t $sha1)
+    case $objtype in
+    commit) check_commit $sha1;;
+    esac
+done
+
